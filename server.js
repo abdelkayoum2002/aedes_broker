@@ -1,44 +1,25 @@
-// server.js
-require('dotenv').config();
-const express = require('express');
 const http = require('http');
+const express = require('express');
+const aedes = require('aedes')();
+const ws = require('websocket-stream');
 const { Server } = require('socket.io');
-const { startBroker } = require('./broker');
 
-// ---- Express app ----
 const app = express();
-app.use(express.json());
-
-// Example REST endpoint
-app.get('/status', (req, res) => {
-  res.json({ status: 'ok' });
-});
-
-// ---- HTTP server ----
 const server = http.createServer(app);
 
-// ---- Attach MQTT WS broker ----
-startBroker({ httpServer: server, wsPath: '/mqtt', tcpPort: 1883 });
+// 1️⃣ Attach Aedes WS first
+ws.createServer({ server, path: '/mqtt' }, aedes.handle);
 
-// ---- Socket.io ----
+// 2️⃣ Attach Socket.io second
 const io = new Server(server, { path: '/socket.io', cors: { origin: '*' } });
+
+// 3️⃣ Socket.io events
 io.on('connection', (socket) => {
-  console.log('⚡ Socket.io client connected:', socket.id);
-
-  socket.on('chat-message', (msg) => {
-    console.log(`💬 ${socket.id}: ${msg}`);
-    io.emit('chat-message', msg); // broadcast
-  });
-
-  socket.on('disconnect', () => console.log('❌ Socket.io disconnected:', socket.id));
+  console.log('⚡ Socket.io connected:', socket.id);
 });
 
-// ---- Start server ----
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8888;
+// 4️⃣ Listen
+const PORT = process.env.PORT || 8888;
 server.listen(PORT, () => {
-  console.log(`🌍 HTTP + MQTT WS + Socket.io running on port ${PORT}`);
-  if (process.env.PORT) {
-    console.log(`🔗 Public MQTT WS: wss://${process.env.RENDER_EXTERNAL_HOSTNAME}/mqtt`);
-    console.log(`🔗 Public Socket.io: wss://${process.env.RENDER_EXTERNAL_HOSTNAME}/socket.io/`);
-  }
+  console.log(`Server running on port ${PORT}`);
 });
