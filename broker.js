@@ -1,130 +1,80 @@
+// Simple Aedes broker that accepts MQTT over WebSocket (path: /mqtt)
+// Designed to run on Render (uses process.env.PORT)
+
 const aedes = require('aedes')();
-const server = require('net').createServer(aedes.handle);
-const httpServer = require('http').createServer();
-const ws = require('websocket-stream');
-const pump = require('pump');
+const http = require('http');
+const websocketStream = require('websocket-stream');
 
-const PORT = process.env.PORT || 1883;
-const WEBSOCKET_PORT = process.env.WS_PORT || 8080;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8888;
 
-// MQTT broker instance
-const broker = aedes;
-
-
-// Event handlers
-broker.on('client', function (client) {
-  console.log(`Client connected: ${client.id}`);
+// Basic client connect/disconnect logging (customize as needed)
+aedes.on('client', (client) => {
+  console.log('Client Connected:', client ? client.id : client);
 });
 
-broker.on('clientDisconnect', function (client) {
-  console.log(`Client disconnected: ${client.id}`);
+aedes.on('clientDisconnect', (client) => {
+  console.log('Client Disconnected:', client ? client.id : client);
 });
 
-
-broker.on('clientError', function (client, err) {
-  console.log(`Client error ${client.id}:`, err.message);
+aedes.on('publish', (packet, client) => {
+  // ignore broker internal "$SYS" publishes (optional)
+  if (client) {
+    console.log(`PUBLISH from ${client.id} - topic: ${packet.topic} payload: ${packet.payload && packet.payload.toString()}`);
+  }
 });
 
-broker.on('connectionError', function (client, err) {
-  console.log('Connection error:', err.message);
+// HTTP server to host websocket upgrades and an optional status page
+const server = http.createServer((req, res) => {
+  // Simple health endpoint
+  if (req.url === '/health' || req.url === '/_health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok', pid: process.pid, time: new Date().toISOString() }));
+    return;
+  }
+
+  // Root info page
+  if (req.url === '/' || req.url === '/index.html') {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(`<html>
+      <body style="font-family:system-ui,Arial">
+        <h2>Aedes MQTT (ws) on Render</h2>
+        <p>MQTT over WebSocket endpoint: <code>/mqtt</code></p>
+        <p>Health: <a href="/health">/health</a></p>
+        <p>Connect your MQTT client using ws://&lt;your-service&gt;:${PORT}/mqtt</p>
+      </body>
+      </html>`);
+    return;
+  }
+
+  // 404
+  res.writeHead(404);
+  res.end('Not found');
 });
 
-// TCP Server for MQTT
-server.listen(PORT, function () {
-  console.log(`AEDES MQTT Broker running on port ${PORT}`);
-  console.log(`Connect using: mqtt://localhost:${PORT}`);
+// Attach websocket-stream to the HTTP server, at path /mqtt
+websocketStream.createServer({ server, path: '/mqtt' }, function (stream, request) {
+  // Optionally check origin or auth headers here (request.headers)
+  // Basic logging:
+  const remote = request.socket.remoteAddress + ':' + request.socket.remotePort;
+  console.log('New websocket connection from', remote, 'path=', request.url);
+  aedes.handle(stream);
 });
 
-// WebSocket Server for MQTT over WebSockets
-ws.createServer({ 
-  server: httpServer,
-  perMessageDeflate: false
-}, pump.bind(null, broker.handle));
-
-httpServer.listen(WEBSOCKET_PORT, function () {
-  console.log(`MQTT WebSocket server running on port ${WEBSOCKET_PORT}`);
-  console.log(`Connect using: ws://localhost:${WEBSOCKET_PORT}`);
+// Start listening
+server.listen(PORT, () => {
+  console.log(`Aedes MQTT over WebSocket listening on :${PORT}  (path: /mqtt)`);
 });
 
-// Health check endpoint
-const express = require('express');
-const app = express();
-
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    broker: 'aedes',
-    clients: broker.clients ? Object.keys(broker.clients).length : 0,
-    uptime: process.uptime(),
-    memory: process.memoryUsage(),
-    timestamp: new Date().toISOString()
-  });
-});
-
-app.get('/', (req, res) => {
-  res.json({
-    name: 'AEDES MQTT Broker',
-    version: require('./package.json').version || '1.0.0',
-    mqtt_port: PORT,
-    websocket_port: WEBSOCKET_PORT,
-    endpoints: {
-      mqtt: `mqtt://localhost:${PORT}`,
-      websocket: `ws://localhost:${WEBSOCKET_PORT}`,
-      health: '/health',
-      stats: '/stats'
-    }
-  });
-});
-
-app.get('/stats', (req, res) => {
-  const stats = broker.stats ? broker.stats : {
-    clients: broker.clients ? Object.keys(broker.clients).length : 0,
-    subscriptions: 0,
-    publications: 0
-  };
-  
-  res.json({
-    ...stats,
-    uptime: process.uptime(),
-    memory: process.memoryUsage(),
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Use a different port for HTTP health checks (Render requirement)
-const HTTP_PORT = process.env.HTTP_PORT || 3000;
-app.listen(HTTP_PORT, () => {
-  console.log(`HTTP health server running on port ${HTTP_PORT}`);
-});
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully');
+// graceful shutdown
+function shutdown() {
+  console.log('Shutting down broker...');
   server.close(() => {
-    httpServer.close(() => {
+    aedes.close(() => {
+      console.log('Broker closed. Exiting.');
       process.exit(0);
     });
   });
-});
+}
 
-process.on('SIGINT', () => {
-  console.log('SIGINT received, shutting down gracefully');
-  server.close(() => {
-    httpServer.close(() => {
-      process.exit(0);
-    });
-  });
-});
-
-// Error handling
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err);
-  process.exit(1);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  process.exit(1);
-});
-
-module.exports = { broker, server, httpServer };
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
