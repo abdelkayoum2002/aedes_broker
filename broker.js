@@ -146,11 +146,41 @@ aedes.authenticate = (client, username, password, callback) => {
   }
 };
 
-// ---- Logs for connections/messages ----
-aedes.on('client', (client) => {
-  console.log(`👤 Client connected: ${client.id}`)
-})
+//authorize subscription by role
+aedes.authorizeSubscribe = (client, sub, callback) => {
+  // ✅ bypass check if super user
+  if (client.super) {
+    return callback(null, sub);
+  }
 
+  try {
+    const role = client.role; // role must be set at auth time
+
+    // fetch allowed subscription topics for this role
+    const stmt = userDb.prepare(`
+      SELECT topic
+      FROM MQTT_Topics
+      WHERE role = ?
+        AND (action = 'sub' OR action = 'pub/sub')
+    `);
+    const rules = stmt.all(role); // array of { topic: '...' }
+
+    // check if requested subscription topic matches at least one rule
+    const allowed = rules.some(rule => mqttWildcard(sub.topic, rule.topic));
+
+    if (allowed) {
+      return callback(null, sub); // ✅ allowed
+    }
+
+    // ❌ not allowed → disconnect client
+    return callback(new Error('Not authorized to subscribe'));
+  } catch (err) {
+    console.error("authorizeSubscribe error:", err);
+    return callback(err); // also disconnects
+  }
+};
+
+//listen when client disconnect
 aedes.on('clientDisconnect', (client) => {
   try {
     const clientId = client?.id || 'unknown';
@@ -179,9 +209,3 @@ aedes.on('clientDisconnect', (client) => {
     console.error(`❌ Error handling disconnect for client: ${client?.id}`, err.message);
   }
 });
-
-aedes.on('publish', (packet, client) => {
-  if (client) {
-    console.log(`📩 Message from ${client.id}: ${packet.topic} -> ${packet.payload.toString()}`)
-  }
-})
