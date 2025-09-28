@@ -59,6 +59,20 @@ function restoreRetained() {
   })
   console.log(`🔄 Restored ${rows.length} retained messages into broker memory`)
 }
+
+//---- Delete a retain msg from dB ----
+const insertOrUpdate = userDb.prepare(`
+      INSERT INTO MQTTRetained (topic, payload, qos, retain)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(topic) DO UPDATE SET
+        payload=excluded.payload,
+        qos=excluded.qos,
+        retain=excluded.retain,
+        updated_at = datetime('now')
+    `)
+const deleteMsg = userDb.prepare(`DELETE FROM MQTTRetained WHERE topic=?`)
+
+//---- Disconnect device when want ----
 function disconnectMQTTDevice(clientId) {
   const client = aedes.clients[clientId];
 
@@ -87,7 +101,7 @@ function disconnectMQTTDevice(clientId) {
   }
 }
 
-// 🔐 Authenticate clients using JWT
+// --🔐 Authenticate clients using JWT ----
 aedes.authenticate = (client, username, password, callback) => {
   const clientId = client.id;
   console.log(clientId)
@@ -146,7 +160,7 @@ aedes.authenticate = (client, username, password, callback) => {
   }
 };
 
-//authorize subscription by role
+//---- Authorize subscription by role ----
 aedes.authorizeSubscribe = (client, sub, callback) => {
   // ✅ bypass check if super user
   if (client.super) {
@@ -177,6 +191,76 @@ aedes.authorizeSubscribe = (client, sub, callback) => {
   } catch (err) {
     console.error("authorizeSubscribe error:", err);
     return callback(err); // also disconnects
+  }
+};
+
+//---- Authorize publishig by role ----
+aedes.authorizePublish = async (client, packet, callback) => {
+  if (client.super){
+      if(packet.retain){
+        if (!packet.payload || packet.payload.length === 0) {
+          // empty payload with retain = delete retained
+          try{
+            deleteMsg.run(packet.topic)
+            console.log(`🗑️ Deleted retained for ${packet.topic}`)
+          }catch(err){
+            console.error(`Failed to Deleted retained for ${packet.topic}: `,err);
+          }
+        } else {
+          try{
+            insertOrUpdate.run(packet.topic, packet.payload, packet.qos, 1)
+            console.log(`💾 Stored retained for ${packet.topic}`)
+          }catch(err){
+            console.error(`Failed to Stored retained for ${packet.topic}: `,err)
+          }
+        }
+      }
+    return callback(null);
+  }
+  if (packet.topic === 'EmergencyStop') {
+    const userId = client.user_id || client.id; // fallback to client.id
+    packet.topic = `EmergencyStop/${userId}`;
+    return callback(null);
+  }
+  try {
+    const role = client.role;
+    const stmt = userDb.prepare(`
+      SELECT topic
+      FROM MQTT_Topics
+      WHERE role = ?
+        AND (action = 'pub' OR action = 'pub/sub')
+    `);
+    console.log(role)
+    console.log(packet.topic)
+    const rules = stmt.all(role);
+    
+    const allowed = rules.some(rule => mqttWildcard(packet.topic, rule.topic));
+
+    if (allowed) {
+      if(packet.retain){
+        if (!packet.payload || packet.payload.length === 0) {
+          // empty payload with retain = delete retained
+          try{
+            deleteMsg.run(packet.topic)
+            console.log(`🗑️ Deleted retained for ${packet.topic}`)
+          }catch(err){
+            console.error(`Failed to Deleted retained for ${packet.topic}: `,err);
+          }
+        } else {
+          try{
+            insertOrUpdate.run(packet.topic, packet.payload, packet.qos, 1)
+            console.log(`💾 Stored retained for ${packet.topic}`)
+          }catch(err){
+            console.error(`Failed to Stored retained for ${packet.topic}: `,err)
+          }
+        }
+      }
+      return callback(null); // ✅ allowed
+    }
+    return callback(new Error('Not authorized to publish'));
+  } catch (err) {
+    console.error("authorizePublish error:",err)
+    return callback(err);
   }
 };
 
