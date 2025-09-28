@@ -65,16 +65,3 @@ server.listen(PORT, () => {
   console.log(`Aedes MQTT over WebSocket listening on :${PORT}  (path: /mqtt)`);
 });
 
-// graceful shutdown
-function shutdown() {
-  console.log('Shutting down broker...');
-  server.close(() => {
-    aedes.close(() => {
-      console.log('Broker closed. Exiting.');
-      process.exit(0);
-    });
-  });
-}
-
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
