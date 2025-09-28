@@ -4,7 +4,6 @@ const http = require('http')
 const ws = require('websocket-stream')
 const mqttWildcard = require('mqtt-wildcard'); 
 const jwt = require('jsonwebtoken');
-const {userDb, sysDb} = require('./database');
 require("dotenv").config();
 
 // Constants
