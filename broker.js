@@ -152,8 +152,33 @@ aedes.on('client', (client) => {
 })
 
 aedes.on('clientDisconnect', (client) => {
-  console.log(`❌ Client disconnected: ${client.id}`)
-})
+  try {
+    const clientId = client?.id || 'unknown';
+    console.log(`🔌 Client disconnected: ${clientId}`);
+
+    if (client && client.id) {
+      // Get current status first
+      const row = userDb.prepare(`
+        SELECT status FROM MQTT WHERE client_id = ?
+      `).get(client.id);
+
+      if (row) {
+        // Only overwrite if not already Disconnected or Deleted
+        if (row.status !== 'Disconnected' && row.status !== 'Deleted') {
+          userDb.prepare(`
+            UPDATE MQTT SET status = ?, last_seen = datetime('now')
+            WHERE client_id = ?
+          `).run('Offline', client.id);
+          console.log(`⚠️ Client ${clientId} marked as Disconnected`);
+        } else {
+          console.log(`🚫 Client ${clientId} status is ${row.status}, not overwriting`);
+        }
+      }
+    }
+  } catch (err) {
+    console.error(`❌ Error handling disconnect for client: ${client?.id}`, err.message);
+  }
+});
 
 aedes.on('publish', (packet, client) => {
   if (client) {
