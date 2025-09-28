@@ -8,28 +8,44 @@ const jwt = require('jsonwebtoken');
 const {userDb} = require('./database');
 require("dotenv").config();  
 
-// ---- TCP broker (local only, not used in Render) ----
-const TCP_PORT = 1883
-if (!process.env.PORT) {
-  const tcpServer = net.createServer(aedes.handle)
+// Constants
+const JWT_SECRET = process.env.JWT_SECRET
+// ---- Ports ----
+const TCP_PORT = 1885;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8888
+// ---- Servers ----
+const tcpServer = net.createServer(aedes.handle)
+const httpServer = http.createServer()
+ws.createServer({ server: httpServer, path: '/mqtt' }, aedes.handle)
+// ---- Promises ----
+const tcpReady = new Promise((resolve) =>
   tcpServer.listen(TCP_PORT, () => {
-    console.log(`🟢 TCP broker listening locally on mqtt://localhost:${TCP_PORT}`)
+    console.log(`🟢 TCP broker listening on mqtt://localhost:${TCP_PORT}`)
+    resolve()
   })
+)
+
+const httpReady = new Promise((resolve) =>
+  httpServer.listen(PORT, () => {
+    console.log(`🟢 WS broker listening on ws://localhost:${PORT}/mqtt`)
+    if (process.env.PORT) {
+      console.log(`🌍 Public URL: wss://${process.env.RENDER_EXTERNAL_HOSTNAME}/mqtt`)
+    }
+    resolve()
+  })
+)
+
+// ---- Run after both are ready ----
+Promise.all([tcpReady, httpReady]).then(() => {
+  console.log('🚀 Both servers up, restoring retained messages...')
+  restoreRetained()
+})
+
+// ---- Example retained restore function ----
+function restoreRetained() {
+  console.log("🔄 Restore retained messages (placeholder)")
 }
 
-// ---- WS broker (local + public on Render) ----
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8888
-const httpServer = http.createServer()
-
-// WS endpoint is "/mqtt"
-ws.createServer({ server: httpServer, path: '/mqtt' }, aedes.handle)
-
-httpServer.listen(PORT, () => {
-  console.log(`🟢 WS broker listening on ws://localhost:${PORT}/mqtt`)
-  if (process.env.PORT) {
-    console.log(`🌍 Public URL: wss://${process.env.RENDER_EXTERNAL_HOSTNAME}/mqtt`)
-  }
-})
 
 // ---- Logs for connections/messages ----
 aedes.on('client', (client) => {
