@@ -41,7 +41,6 @@ Promise.all([tcpReady, httpReady]).then(() => {
   restoreRetained()
 })
 
-// ---- Example retained restore function ----
 // ---- Restore retained messages on startup ----
 function restoreRetained() {
   const rows = userDb.prepare('SELECT topic, payload, qos FROM MQTTRetained').all()
@@ -59,6 +58,33 @@ function restoreRetained() {
     })
   })
   console.log(`🔄 Restored ${rows.length} retained messages into broker memory`)
+}
+function disconnectMQTTDevice(clientId) {
+  const client = aedes.clients[clientId];
+
+  if (client) {
+    // Close the TCP connection of that client
+    client.close(() => {
+      console.log(`MQTT client ${clientId} forcibly deleted`);
+    });
+  } else {
+    console.log(`MQTT client ${clientId} not found`);
+  }
+
+  // Update DB regardless of whether client was online
+  const result = userDb.prepare(`
+    UPDATE MQTT
+    SET status = 'Disconnected', last_seen = datetime('now')
+    WHERE client_id = ?
+  `).run(clientId);
+
+  if (result.changes > 0) {
+    console.log(`MQTT client ${clientId} disconectes secussfuly`);
+    return true;
+  } else {
+    console.log(`MQTT client ${clientId} not found in DB`);
+    return false;
+  }
 }
 
 
