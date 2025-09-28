@@ -3,7 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const { createMQTTBroker } = require('./broker');
+const { startBroker } = require('./broker');
 
 // ---- Express app ----
 const app = express();
@@ -17,13 +17,19 @@ app.get('/status', (req, res) => {
 // ---- HTTP server ----
 const server = http.createServer(app);
 
-// ---- Attach Aedes MQTT WS to the same HTTP server ----
-createMQTTBroker({ httpServer: server, wsPath: '/mqtt', tcpPort: 1883 });
+// ---- Attach MQTT WS broker ----
+startBroker({ httpServer: server, wsPath: '/mqtt', tcpPort: 1883 });
 
 // ---- Socket.io ----
 const io = new Server(server, { path: '/socket.io', cors: { origin: '*' } });
 io.on('connection', (socket) => {
   console.log('⚡ Socket.io client connected:', socket.id);
+
+  socket.on('chat-message', (msg) => {
+    console.log(`💬 ${socket.id}: ${msg}`);
+    io.emit('chat-message', msg); // broadcast
+  });
+
   socket.on('disconnect', () => console.log('❌ Socket.io disconnected:', socket.id));
 });
 
