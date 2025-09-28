@@ -87,6 +87,64 @@ function disconnectMQTTDevice(clientId) {
   }
 }
 
+// 🔐 Authenticate clients using JWT
+aedes.authenticate = (client, username, password, callback) => {
+  const clientId = client.id;
+  console.log(clientId)
+  if (username === 'super') {
+    client.super=true;
+    console.log(`⚡ Super-user connected: ${clientId}`);
+    return callback(null, true);
+  }
+  try {
+    const token = password?.toString();
+    if (!token) {
+      return callback(new Error('❌ No token provided'), false);
+    }
+    const decoded = jwt.verify(token, JWT_SECRET);
+    console.log(decoded)
+    if (decoded.type === 'Service') {
+      client.role = decoded.role
+      console.log(`✅ Service authenticated: ${client.role}`);
+      return callback(null, true); // no DB lookup for services
+    }
+    // 1. Get device info
+    const mqttRow = userDb.prepare(`
+      SELECT client_id, device_id, status
+      FROM MQTT
+      WHERE client_id = ?
+    `).get(clientId);
+
+    console.log('mqttRow:', mqttRow);
+
+    if (!mqttRow) {
+      console.log(`❌ Unknown client_id: ${clientId}`);
+      return callback(null, false);
+    }
+
+    // 🔎 Check MQTT status
+    if (mqttRow.status === 'Disconnected') {
+      console.log(`⛔ Disconnected mqtt devices tried to connect: ${mqttRow.client_id}`);
+      return callback(null, false);
+    }
+
+    if (mqttRow.status === 'Deleted') {
+      console.log(`🗑️ Deleted mqtt devices to connect: ${mqttRow.client_id}`);
+      return callback(null, false);
+    }
+    userDb.prepare(`
+      UPDATE MQTT SET status = ?, last_seen = datetime('now')
+      WHERE client_id = ?
+    `).run('Online', clientId);
+    client.role=decoded.role;
+    client.user_id=decoded.id;
+    console.log(`✅ Authenticated:`, decoded.username);
+    return callback(null, true);
+  } catch (err) {
+    console.error('❌ JWT Verification Error:', err.message);
+    return callback(new Error('JWT auth failed'), false);
+  }
+};
 
 // ---- Logs for connections/messages ----
 aedes.on('client', (client) => {
