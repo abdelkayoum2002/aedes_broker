@@ -10,31 +10,6 @@ const WEBSOCKET_PORT = process.env.WS_PORT || 8080;
 // MQTT broker instance
 const broker = aedes;
 
-// Authentication (optional)
-broker.authenticate = function (client, username, password, callback) {
-  console.log(`Authentication attempt - Client: ${client.id}, Username: ${username}`);
-  
-  // Add your authentication logic here
-  // For now, allow all connections
-  callback(null, true);
-};
-
-// Authorization (optional)
-broker.authorizePublish = function (client, packet, callback) {
-  console.log(`Publish authorization - Client: ${client.id}, Topic: ${packet.topic}`);
-  
-  // Add your authorization logic here
-  // For now, allow all publications
-  callback(null);
-};
-
-broker.authorizeSubscribe = function (client, sub, callback) {
-  console.log(`Subscribe authorization - Client: ${client.id}, Topic: ${sub.topic}`);
-  
-  // Add your authorization logic here
-  // For now, allow all subscriptions
-  callback(null, sub);
-};
 
 // Event handlers
 broker.on('client', function (client) {
@@ -45,21 +20,6 @@ broker.on('clientDisconnect', function (client) {
   console.log(`Client disconnected: ${client.id}`);
 });
 
-broker.on('publish', function (packet, client) {
-  if (client) {
-    console.log(`Message published by ${client.id}: ${packet.topic} - ${packet.payload.toString()}`);
-  } else {
-    console.log(`System message: ${packet.topic} - ${packet.payload.toString()}`);
-  }
-});
-
-broker.on('subscribe', function (subscriptions, client) {
-  console.log(`Client ${client.id} subscribed to:`, subscriptions.map(s => s.topic).join(', '));
-});
-
-broker.on('unsubscribe', function (subscriptions, client) {
-  console.log(`Client ${client.id} unsubscribed from:`, subscriptions.join(', '));
-});
 
 broker.on('clientError', function (client, err) {
   console.log(`Client error ${client.id}:`, err.message);
