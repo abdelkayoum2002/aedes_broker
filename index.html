@@ -1,0 +1,44 @@
+<!-- index.html (place next to server.js) -->
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>MQTT + Socket.IO demo</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+</head>
+<body>
+  <h1>MQTT over WebSocket + Socket.IO demo</h1>
+
+  <div>
+    <button id="connect-mqtt">Connect MQTT (ws)</button>
+    <button id="publish-mqtt">Publish MQTT topic test/hello</button>
+    <pre id="log"></pre>
+  </div>
+
+  <script>
+    const log = (s) => { document.getElementById('log').textContent += s + '\n'; }
+    // Socket.IO client (receives forwarded MQTT messages)
+    const sio = io();
+    sio.on('connect', () => log('socket.io connected: ' + sio.id));
+    sio.on('mqtt-message', (m) => {
+      log('Forwarded MQTT -> socket.io: ' + JSON.stringify(m));
+    });
+
+    // MQTT over WebSocket client
+    let mqttClient;
+    document.getElementById('connect-mqtt').onclick = () => {
+      const wsUrl = (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/mqtt';
+      mqttClient = mqtt.connect(wsUrl);
+      mqttClient.on('connect', () => log('mqtt ws connected'));
+      mqttClient.on('message', (t, p) => log('mqtt message: ' + t + ' -> ' + p.toString()));
+      // subscribe to example
+      mqttClient.subscribe('test/#', (err) => { if (!err) log('subscribed test/#'); });
+    };
+    document.getElementById('publish-mqtt').onclick = () => {
+      if (!mqttClient) return log('mqtt not connected');
+      mqttClient.publish('test/hello', 'hello from browser ' + new Date().toISOString());
+    };
+  </script>
+</body>
+</html>
