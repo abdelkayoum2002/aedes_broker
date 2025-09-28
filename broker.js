@@ -1,8 +1,12 @@
-// ---- Imports ----
+
 const aedes = require('aedes')()
 const net = require('net')
 const http = require('http')
 const ws = require('websocket-stream')
+const mqttWildcard = require('mqtt-wildcard'); 
+const jwt = require('jsonwebtoken');
+const {userDb} = require('./database');
+require("dotenv").config();  
 
 // ---- TCP broker (local only, not used in Render) ----
 const TCP_PORT = 1883
