@@ -42,8 +42,23 @@ Promise.all([tcpReady, httpReady]).then(() => {
 })
 
 // ---- Example retained restore function ----
+// ---- Restore retained messages on startup ----
 function restoreRetained() {
-  console.log("🔄 Restore retained messages (placeholder)")
+  const rows = userDb.prepare('SELECT topic, payload, qos FROM MQTTRetained').all()
+  rows.forEach(row => {
+    const packet = {
+      topic: row.topic,
+      payload: Buffer.from(row.payload),
+      qos: row.qos || 0,
+      retain: true
+    }
+    aedes.persistence.storeRetained(packet, (err) => {
+      if (err) {
+        console.error(`❌ Failed to restore retained for ${row.topic}:`, err)
+      }
+    })
+  })
+  console.log(`🔄 Restored ${rows.length} retained messages into broker memory`)
 }
 
 
