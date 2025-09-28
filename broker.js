@@ -293,3 +293,8 @@ aedes.on('clientDisconnect', (client) => {
     console.error(`❌ Error handling disconnect for client: ${client?.id}`, err.message);
   }
 });
+
+
+module.exports = {
+  disconnectMQTTDevice
+};
