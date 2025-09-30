@@ -1,81 +1,47 @@
-// server.js
+// server.js = entry point
 const express = require('express');
 const http = require('http');
-const { Server: IOServer } = require('socket.io');
-const path = require('path');
+const { Server } = require('socket.io');
+const mqtt = require('mqtt');
+const startBroker = require('./broker');
 
-const { attachWebSocket, attachTCP, getBroker, closeBroker } = require('./broker');
+// Start broker inside same process
+startBroker();
 
 const PORT = process.env.PORT || 3000;
-const ENABLE_TCP_MQTT = process.env.ENABLE_TCP_MQTT === 'true';
+const MQTT_WS_URL = process.env.MQTT_WS_URL || 'ws://localhost:8083/mqtt';
 
-// --- Express setup ---
 const app = express();
-app.use(express.json());
+const server = http.createServer(app);
+const io = new Server(server);
 
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+// API route
+app.get('/', (req, res) => res.send('HTTP + Socket.io + MQTT broker is running'));
+
+// MQTT client (connect to local broker via WS)
+const mqttClient = mqtt.connect(MQTT_WS_URL);
+
+mqttClient.on('connect', () => {
+  console.log(`🔗 Connected to local MQTT broker at ${MQTT_WS_URL}`);
+  mqttClient.subscribe('silos/+/alerts');
 });
 
-app.get('/health', (req, res) => res.json({ ok: true }));
-
-// --- HTTP + Socket.IO ---
-const httpServer = http.createServer(app);
-const io = new IOServer(httpServer, { cors: { origin: '*' } });
-
-// Forward MQTT → Socket.IO
-const broker = getBroker();
-broker.on('publish', (packet, client) => {
-  const payload = packet.payload ? packet.payload.toString() : null;
-  io.emit('mqtt-message', {
-    topic: packet.topic,
-    payload,
-    qos: packet.qos,
-    retain: packet.retain,
-    clientId: client ? client.id : null
-  });
+mqttClient.on('message', (topic, payload) => {
+  const msg = payload.toString();
+  console.log('📩 MQTT ->', topic, msg);
+  io.emit('mqtt', { topic, msg });
 });
 
-// Allow Socket.IO → MQTT
+// socket.io bridge
 io.on('connection', (socket) => {
-  console.log('socket.io connected:', socket.id);
+  console.log('🟢 socket.io client connected', socket.id);
 
-  socket.on('publish', ({ topic, payload, qos = 0, retain = false }) => {
-    if (!topic) return;
-    broker.publish(
-      { topic, payload: Buffer.from(String(payload || '')), qos, retain },
-      (err) => {
-        if (err) console.error('socket.io publish error', err);
-      }
-    );
-  });
-
-  socket.on('disconnect', () => {
-    console.log('socket.io disconnected:', socket.id);
+  socket.on('publish', ({ topic, msg }) => mqttClient.publish(topic, msg));
+  socket.on('subscribe', (topic) => {
+    mqttClient.subscribe(topic, () => socket.emit('subscribed', topic));
   });
 });
 
-// --- Attach MQTT over WebSocket ---
-attachWebSocket(httpServer, '/mqtt');
-
-// --- Optional plain TCP MQTT ---
-let tcpServer;
-if (ENABLE_TCP_MQTT) {
-  tcpServer = attachTCP(1883);
-}
-
-// --- Start server ---
-httpServer.listen(PORT, () => {
-  console.log(`HTTP + WS server running on port ${PORT}`);
-  console.log(`MQTT over WebSocket: ws://<host>:${PORT}/mqtt`);
+server.listen(PORT, () => {
+  console.log(`🌍 HTTP + Socket.io running on port ${PORT}`);
 });
-
-// --- Graceful shutdown ---
-function shutdown() {
-  console.log('Shutting down...');
-  httpServer.close();
-  if (tcpServer) tcpServer.close();
-  closeBroker(() => process.exit(0));
-}
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
